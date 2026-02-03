@@ -1,0 +1,84 @@
+name: Daily Sentiment-Market Pipeline
+
+on:
+  schedule:
+    # Run daily at 6 AM UTC (after US market close + settlement)
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      articles:
+        description: 'Number of articles to fetch'
+        required: false
+        default: '100'
+      backfill_days:
+        description: 'Days of stock data to backfill'
+        required: false
+        default: '7'
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download existing database
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: sentiment-market-db
+          path: data/
+
+      - name: Initialize database if needed
+        run: python -m market_analysis.daily_runner init
+
+      - name: Run daily pipeline
+        env:
+          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+        run: |
+          python -m market_analysis.daily_runner run \
+            --articles ${{ github.event.inputs.articles || '100' }} \
+            --days 1
+
+      - name: Backfill stock data
+        run: |
+          python -m market_analysis.daily_runner backfill \
+            --days ${{ github.event.inputs.backfill_days || '7' }}
+
+      - name: Generate correlation report
+        run: python -m market_analysis.correlation > correlation_report.txt
+
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentiment-market-db
+          path: data/sentiment_market.db
+          retention-days: 90
+
+      - name: Upload correlation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: correlation-report-${{ github.run_number }}
+          path: correlation_report.txt
+          retention-days: 30
+
+      - name: Commit updated database (optional)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -f data/sentiment_market.db || true
+          git diff --staged --quiet || git commit -m "chore: update sentiment-market database [skip ci]"
+          git push || true
