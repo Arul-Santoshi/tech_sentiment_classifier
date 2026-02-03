@@ -118,6 +118,80 @@ Uses `distilbert-base-uncased-finetuned-sst-2-english` from Hugging Face:
 - Binary classification adapted to three-class output
 - Sentiment thresholds: positive (>0.2), negative (<-0.2), neutral (between)
 
+## Analysis Results (February 3, 2026)
+
+The classifier was run on **February 3, 2026**, analyzing technology and AI news articles published on **February 2, 2026**.
+
+### Dataset Overview
+
+| Metric | Value |
+|--------|-------|
+| Total Articles Analyzed | 97 |
+| Article Date | February 2, 2026 |
+| Analysis Date | February 3, 2026 |
+
+### Sentiment Distribution
+
+| Sentiment | Count | Percentage |
+|-----------|-------|------------|
+| Negative | 60 | 61.9% |
+| Positive | 36 | 37.1% |
+| Neutral | 1 | 1.0% |
+
+### Sentiment Score Statistics
+
+- **Average Score**: -0.2273 (slightly negative)
+- **Minimum Score**: -0.9993
+- **Maximum Score**: +0.9995
+
+### Top News Sources
+
+| Source | Articles |
+|--------|----------|
+| Pypi.org | 11 |
+| The Times of India | 6 |
+| GlobeNewswire | 4 |
+| Slashdot.org | 3 |
+| CNBC | 2 |
+| pymnts.com | 2 |
+| CNET | 2 |
+| Android Central | 2 |
+| Fortune | 2 |
+| The Punch | 2 |
+
+### Key Findings
+
+#### AI-Focused Coverage
+- **37 of 97 articles (38%)** were directly related to AI, OpenAI, Nvidia, AI agents, or LLMs
+- AI-related articles showed mixed sentiment with both concerns and optimism
+
+#### Notable Positive Headlines
+- OpenAI Codex Mac app launch with multi-agent capabilities
+- Nvidia CEO affirms partnership with OpenAI
+- Enterprise AI adoption growing (OpenAI and Anthropic competing for Global 2000 companies)
+- AI-powered marketing and federal hiring solutions announcements
+
+#### Notable Negative Headlines
+- Grok AI abuse concerns (reports of millions of nonconsensual images)
+- Mozilla Firefox adding controls to block AI features
+- IAB proposing legislation to protect publishers from AI content scraping
+- AI "truth crisis" concerns from MIT Technology Review
+- Security experts warning about AI agent social networks
+
+#### Industry Observations
+- Strong presence of AI agent frameworks and tools on PyPI (11 articles)
+- Consumer tech coverage showed skepticism (smartphone specs "overkill", feature concerns)
+- Return-to-office mandates generating negative coverage
+- Trade deals (India-US) received positive financial coverage
+
+### Interpretation
+
+The predominantly negative sentiment (61.9%) reflects several trends in tech news coverage on this date:
+1. **AI Safety Concerns**: Multiple articles highlighted risks from AI image generation abuse and AI-powered social networks
+2. **Industry Pushback**: Coverage of controls to block AI features and legislation to protect content creators
+3. **Enterprise Optimism**: Business-focused AI coverage was more positive, highlighting partnerships and growth
+4. **Consumer Skepticism**: Tech product announcements received critical analysis rather than hype
+
 ## License
 
 MIT License
