@@ -9,7 +9,13 @@ import pandas as pd
 from .db import Database
 
 # Default tickers to track
-DEFAULT_TICKERS = ["QQQM", "VOO", "VGT"]
+DEFAULT_TICKERS = [
+    "QQQM",     # Nasdaq 100 (tech-heavy)
+    "VOO",      # S&P 500 (broad market)
+    "VGT",      # Vanguard IT (pure tech sector)
+    "^VIX",     # CBOE Volatility Index (fear gauge)
+    "BTC-USD",  # Bitcoin (crypto sentiment proxy)
+]
 
 
 class StockDataFetcher:

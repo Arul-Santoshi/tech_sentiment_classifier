@@ -154,13 +154,15 @@ python -m market_analysis.daily_runner run --articles 100
 python -m market_analysis.correlation
 ```
 
-### Tracked ETFs
+### Tracked Tickers
 
 | Ticker | Description | Why Track It |
 |--------|-------------|--------------|
 | QQQM | Nasdaq 100 | Tech-heavy index |
 | VOO | S&P 500 | Broad market benchmark |
 | VGT | Vanguard IT | Pure tech sector exposure |
+| ^VIX | CBOE Volatility Index | Fear gauge - high VIX often correlates with negative news |
+| BTC-USD | Bitcoin | Crypto sentiment often tracks tech sentiment |
 
 ### Correlation Analysis
 
