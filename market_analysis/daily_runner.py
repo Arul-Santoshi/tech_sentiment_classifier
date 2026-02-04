@@ -4,6 +4,12 @@ Daily Runner - Automated pipeline for sentiment-market correlation tracking.
 
 Fetches news, runs sentiment analysis, pulls stock data, and stores in SQLite.
 Designed to run daily via cron or GitHub Actions.
+
+Now includes market session classification for stronger correlation analysis:
+- pre_market: 12:00 AM - 9:29 AM ET → same-day returns
+- market_hours: 9:30 AM - 4:00 PM ET → same-day returns
+- after_hours: 4:01 PM - 11:59 PM ET → next-day returns
+- weekend: Sat/Sun → Monday returns
 """
 
 import os
@@ -21,8 +27,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from news_fetcher import NewsFetcher
 from sentiment_classifier import SentimentClassifier
-from market_analysis.db import Database
+from market_analysis.db import Database, MARKET_SESSIONS
 from market_analysis.stock_data import StockDataFetcher, DEFAULT_TICKERS
+from market_analysis.market_session import (
+    classify_market_session,
+    classify_by_date_only,
+    get_session_description,
+)
 
 # AI-related keywords for filtering
 AI_KEYWORDS = ["AI", "OpenAI", "Nvidia", "Anthropic", "LLM", "GPT", "Codex", "agent", "machine learning"]
@@ -38,6 +49,17 @@ def aggregate_sentiment(df: pd.DataFrame) -> dict:
     Returns:
         Dictionary of aggregated metrics
     """
+    if df.empty:
+        return {
+            "article_count": 0,
+            "avg_score": 0.0,
+            "positive_count": 0,
+            "negative_count": 0,
+            "neutral_count": 0,
+            "ai_article_count": 0,
+            "ai_avg_score": 0.0,
+        }
+
     ai_mask = df["headline"].str.contains("|".join(AI_KEYWORDS), case=False, na=False)
 
     return {
@@ -49,6 +71,35 @@ def aggregate_sentiment(df: pd.DataFrame) -> dict:
         "ai_article_count": int(ai_mask.sum()),
         "ai_avg_score": float(df.loc[ai_mask, "sentiment_score"].mean()) if ai_mask.any() else 0.0,
     }
+
+
+def classify_articles_by_session(articles: list[dict]) -> list[dict]:
+    """
+    Add market session classification to articles.
+
+    Args:
+        articles: List of article dicts with 'date' and optionally 'published_at'
+
+    Returns:
+        Articles with added 'market_session' and 'trading_date' fields
+    """
+    for article in articles:
+        published_at = article.get("published_at")
+
+        if published_at:
+            # Use full timestamp if available
+            session, trading_date = classify_market_session(published_at)
+        else:
+            # Fall back to date-only classification (assume pre-market)
+            session, trading_date = classify_by_date_only(
+                article.get("date", ""),
+                assume_session="pre_market"
+            )
+
+        article["market_session"] = session
+        article["trading_date"] = trading_date
+
+    return articles
 
 
 def run_daily_pipeline(
@@ -86,7 +137,7 @@ def run_daily_pipeline(
     print("=" * 60)
 
     # Step 1: Fetch news articles
-    print("\n[1/4] Fetching news articles...")
+    print("\n[1/5] Fetching news articles...")
     print("-" * 40)
 
     try:
@@ -97,6 +148,15 @@ def run_daily_pipeline(
             target_count=target_articles,
         )
         articles = fetcher.extract_article_data(raw_articles)
+
+        # Preserve the full published_at timestamp from raw articles
+        url_to_published = {
+            a.get("url"): a.get("publishedAt")
+            for a in raw_articles if a.get("url")
+        }
+        for article in articles:
+            article["published_at"] = url_to_published.get(article.get("url"))
+
         stats["articles_fetched"] = len(articles)
         print(f"Fetched {len(articles)} articles")
     except Exception as e:
@@ -110,7 +170,7 @@ def run_daily_pipeline(
         return stats
 
     # Step 2: Run sentiment classification
-    print("\n[2/4] Running sentiment classification...")
+    print("\n[2/5] Running sentiment classification...")
     print("-" * 40)
 
     try:
@@ -123,15 +183,28 @@ def run_daily_pipeline(
             article["sentiment_label"] = label
             article["sentiment_score"] = score
 
-        df = pd.DataFrame(articles)
-        print(f"Classified {len(df)} articles")
+        print(f"Classified {len(articles)} articles")
     except Exception as e:
         print(f"Error in classification: {e}")
         stats["error"] = str(e)
         return stats
 
-    # Step 3: Store sentiment data
-    print("\n[3/4] Storing sentiment data...")
+    # Step 3: Classify by market session
+    print("\n[3/5] Classifying by market session...")
+    print("-" * 40)
+
+    articles = classify_articles_by_session(articles)
+    df = pd.DataFrame(articles)
+
+    # Print session distribution
+    session_counts = df["market_session"].value_counts()
+    for session, count in session_counts.items():
+        print(f"  {session}: {count} articles")
+
+    stats["session_distribution"] = session_counts.to_dict()
+
+    # Step 4: Store sentiment data
+    print("\n[4/5] Storing sentiment data...")
     print("-" * 40)
 
     try:
@@ -144,9 +217,12 @@ def run_daily_pipeline(
                 sentiment_label=row["sentiment_label"],
                 sentiment_score=row["sentiment_score"],
                 url=row.get("url", ""),
+                published_at=row.get("published_at"),
+                market_session=row.get("market_session"),
+                trading_date=row.get("trading_date"),
             )
 
-        # Aggregate by date and store
+        # Aggregate by date (legacy table - for backward compatibility)
         for article_date, group in df.groupby("date"):
             agg = aggregate_sentiment(group)
             db.insert_daily_sentiment(
@@ -161,14 +237,34 @@ def run_daily_pipeline(
             )
             print(f"  {article_date}: {agg['article_count']} articles, avg score: {agg['avg_score']:.4f}")
 
+        # Aggregate by trading_date + market_session (new session-based table)
+        print("\n  Session-based aggregation:")
+        for (trading_date, session), group in df.groupby(["trading_date", "market_session"]):
+            if not trading_date or not session:
+                continue
+            agg = aggregate_sentiment(group)
+            db.insert_session_sentiment(
+                trading_date=trading_date,
+                market_session=session,
+                article_count=agg["article_count"],
+                avg_score=agg["avg_score"],
+                positive_count=agg["positive_count"],
+                negative_count=agg["negative_count"],
+                neutral_count=agg["neutral_count"],
+                ai_article_count=agg["ai_article_count"],
+                ai_avg_score=agg["ai_avg_score"],
+            )
+            print(f"    {trading_date} [{session}]: {agg['article_count']} articles, avg: {agg['avg_score']:.4f}")
+
         stats["dates_processed"] = df["date"].nunique()
+        stats["trading_dates_processed"] = df["trading_date"].nunique()
     except Exception as e:
         print(f"Error storing sentiment: {e}")
         stats["error"] = str(e)
         return stats
 
-    # Step 4: Fetch stock data
-    print("\n[4/4] Fetching stock market data...")
+    # Step 5: Fetch stock data
+    print("\n[5/5] Fetching stock market data...")
     print("-" * 40)
 
     try:
@@ -189,9 +285,11 @@ def run_daily_pipeline(
     print("=" * 60)
 
     date_range = db.get_date_range()
-    print(f"Database date range: {date_range[0]} to {date_range[1]}")
+    session_range = db.get_session_date_range()
+    print(f"Daily sentiment date range: {date_range[0]} to {date_range[1]}")
+    print(f"Session sentiment date range: {session_range[0]} to {session_range[1]}")
     print(f"Articles processed: {stats.get('articles_fetched', 0)}")
-    print(f"Dates in database: {stats.get('dates_processed', 0)}")
+    print(f"Trading dates processed: {stats.get('trading_dates_processed', 0)}")
 
     stats["success"] = True
     return stats
@@ -234,6 +332,10 @@ def import_existing_csv(
     """
     Import existing sentiment CSV into the database.
 
+    Note: CSVs with only date (no timestamp) will be classified as pre_market
+    for that date, which may not be accurate. For best results, collect new
+    data with full timestamps.
+
     Args:
         csv_path: Path to CSV file with sentiment data
         db: Database instance
@@ -250,6 +352,23 @@ def import_existing_csv(
         print(f"Error: CSV must contain columns: {required_cols}")
         return
 
+    # Check if we have timestamp data
+    has_timestamps = "published_at" in df.columns or "publishedAt" in df.columns
+    if not has_timestamps:
+        print("Warning: CSV has no timestamp column. Articles will be classified as pre_market.")
+        print("         For accurate session classification, collect new data with timestamps.")
+
+    # Classify by market session
+    articles = df.to_dict("records")
+
+    # Handle different possible timestamp column names
+    for article in articles:
+        if "publishedAt" in article:
+            article["published_at"] = article["publishedAt"]
+
+    articles = classify_articles_by_session(articles)
+    df = pd.DataFrame(articles)
+
     # Store individual articles
     for _, row in df.iterrows():
         db.insert_article(
@@ -259,9 +378,12 @@ def import_existing_csv(
             sentiment_label=row["sentiment_label"],
             sentiment_score=row["sentiment_score"],
             url=row.get("url", ""),
+            published_at=row.get("published_at"),
+            market_session=row.get("market_session"),
+            trading_date=row.get("trading_date"),
         )
 
-    # Aggregate by date
+    # Aggregate by date (legacy)
     for article_date, group in df.groupby("date"):
         agg = aggregate_sentiment(group)
         db.insert_daily_sentiment(
@@ -275,7 +397,50 @@ def import_existing_csv(
             ai_avg_score=agg["ai_avg_score"],
         )
 
+    # Aggregate by session
+    for (trading_date, session), group in df.groupby(["trading_date", "market_session"]):
+        if not trading_date or not session:
+            continue
+        agg = aggregate_sentiment(group)
+        db.insert_session_sentiment(
+            trading_date=trading_date,
+            market_session=session,
+            article_count=agg["article_count"],
+            avg_score=agg["avg_score"],
+            positive_count=agg["positive_count"],
+            negative_count=agg["negative_count"],
+            neutral_count=agg["neutral_count"],
+            ai_article_count=agg["ai_article_count"],
+            ai_avg_score=agg["ai_avg_score"],
+        )
+
     print(f"Imported {len(df)} articles across {df['date'].nunique()} dates")
+    print(f"Trading dates: {df['trading_date'].nunique()}")
+    print(f"Session distribution:")
+    for session, count in df["market_session"].value_counts().items():
+        print(f"  {session}: {count}")
+
+
+def clear_sentiment_data(db: Optional[Database] = None) -> None:
+    """
+    Clear all sentiment data for repopulation.
+
+    Preserves stock price data as it doesn't need repopulation.
+    """
+    db = db or Database()
+
+    print("=" * 60)
+    print("CLEARING SENTIMENT DATA")
+    print("=" * 60)
+
+    confirm = input("This will delete all articles and sentiment data. Continue? [y/N]: ")
+    if confirm.lower() != "y":
+        print("Aborted.")
+        return
+
+    db.clear_all_data()
+    print("Sentiment data cleared. Stock price data preserved.")
+    print("Run 'import' to repopulate with new session classification.")
 
 
 def main():
@@ -305,6 +470,9 @@ def main():
     # Init command
     subparsers.add_parser("init", help="Initialize database schema")
 
+    # Clear command
+    subparsers.add_parser("clear", help="Clear sentiment data for repopulation")
+
     args = parser.parse_args()
     load_dotenv()
 
@@ -326,6 +494,9 @@ def main():
     elif args.command == "init":
         db.init_schema()
         print(f"Database initialized at: {db.db_path}")
+
+    elif args.command == "clear":
+        clear_sentiment_data(db)
 
     else:
         parser.print_help()

@@ -108,8 +108,97 @@ tech_sentiment_classifier/
 ├── test_classifier.py      # Test script for validation
 ├── requirements.txt        # Python dependencies
 ├── .env.example           # Environment variable template
-└── README.md              # This file
+├── README.md              # This file
+└── market_analysis/        # Stock market correlation module
+    ├── __init__.py
+    ├── db.py               # SQLite database schema
+    ├── stock_data.py       # yfinance integration
+    ├── market_session.py   # Market hours classification
+    ├── daily_runner.py     # Automated pipeline
+    └── correlation.py      # Statistical analysis
 ```
+
+## Market Analysis Module
+
+The `market_analysis` module tracks sentiment-stock market correlations over time.
+
+### Market Session Classification
+
+Articles are classified by when they're published relative to US market hours (Eastern Time):
+
+| Session | Time Range (ET) | Maps To |
+|---------|-----------------|---------|
+| `pre_market` | 12:00 AM - 9:29 AM | Same-day intraday returns |
+| `market_hours` | 9:30 AM - 4:00 PM | Same-day returns |
+| `after_hours` | 4:01 PM - 11:59 PM | Next trading day returns |
+| `weekend` | Saturday/Sunday | Monday returns |
+
+**Why this matters**: Pre-market sentiment is the strongest signal because it represents news that investors see before they can act. Mixing all news from a calendar day dilutes this signal.
+
+### Quick Start
+
+```bash
+# Initialize the database
+python -m market_analysis.daily_runner init
+
+# Import existing sentiment data
+python -m market_analysis.daily_runner import tech_sentiment_results.csv
+
+# Backfill 90 days of stock data (QQQM, VOO, VGT)
+python -m market_analysis.daily_runner backfill --days 90
+
+# Run daily pipeline (fetches news + sentiment + stock data)
+python -m market_analysis.daily_runner run --articles 100
+
+# Generate correlation report
+python -m market_analysis.correlation
+```
+
+### Tracked Tickers
+
+| Ticker | Description | Why Track It |
+|--------|-------------|--------------|
+| QQQM | Nasdaq 100 | Tech-heavy index |
+| VOO | S&P 500 | Broad market benchmark |
+| VGT | Vanguard IT | Pure tech sector exposure |
+| ^VIX | CBOE Volatility Index | Fear gauge - high VIX often correlates with negative news |
+| BTC-USD | Bitcoin | Crypto sentiment often tracks tech sentiment |
+
+### Correlation Analysis
+
+The module calculates:
+- **Pearson correlation**: Linear relationship strength
+- **Spearman correlation**: Rank-based (more robust to outliers)
+- **Lag analysis**: Tests if sentiment predicts returns 0-5 days ahead
+- **Session analysis**: Compares pre_market vs after_hours vs weekend signals
+
+### Automated Collection (GitHub Actions)
+
+A workflow runs daily at 6 AM UTC to:
+1. Fetch previous day's tech news
+2. Run sentiment classification
+3. Classify articles by market session
+4. Pull stock data from Yahoo Finance
+5. Commit updated database to the repo
+
+**Setup**: Add `NEWSAPI_KEY` as a GitHub repository secret.
+
+### Data Repopulation
+
+If you need to re-import data with updated session classification:
+
+```bash
+# Clear existing sentiment data (preserves stock prices)
+python -m market_analysis.daily_runner clear
+
+# Re-import with session classification
+python -m market_analysis.daily_runner import tech_sentiment_results.csv
+
+# Backfill stock data if needed
+python -m market_analysis.daily_runner backfill --days 90
+```
+
+**Note**: The existing CSV (`tech_sentiment_results.csv`) only has dates, not timestamps. These articles will be classified as `pre_market` by default. For accurate session classification, collect new data going forward.
 
 ## Model Details
 

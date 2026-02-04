@@ -9,7 +9,13 @@ import pandas as pd
 from .db import Database
 
 # Default tickers to track
-DEFAULT_TICKERS = ["QQQM", "VOO", "VGT"]
+DEFAULT_TICKERS = [
+    "QQQM",     # Nasdaq 100 (tech-heavy)
+    "VOO",      # S&P 500 (broad market)
+    "VGT",      # Vanguard IT (pure tech sector)
+    "^VIX",     # CBOE Volatility Index (fear gauge)
+    "BTC-USD",  # Bitcoin (crypto sentiment proxy)
+]
 
 
 class StockDataFetcher:
@@ -67,9 +73,13 @@ class StockDataFetcher:
             else:
                 ticker_df = df.xs(ticker, level=1, axis=1) if isinstance(df.columns, pd.MultiIndex) else df
 
-            # Calculate daily returns
+            # Calculate daily returns (close-to-close) and intraday returns (open-to-close)
             ticker_df = ticker_df.copy()
             ticker_df["Daily_Return"] = ticker_df["Adj Close"].pct_change() * 100
+            # Intraday return: (Close - Open) / Open * 100
+            ticker_df["Intraday_Return"] = (
+                (ticker_df["Close"] - ticker_df["Open"]) / ticker_df["Open"] * 100
+            )
 
             for idx, row in ticker_df.iterrows():
                 if pd.isna(row["Close"]):
@@ -87,6 +97,7 @@ class StockDataFetcher:
                     adj_close=float(row["Adj Close"]) if not pd.isna(row["Adj Close"]) else 0.0,
                     volume=int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
                     daily_return=float(row["Daily_Return"]) if not pd.isna(row["Daily_Return"]) else 0.0,
+                    intraday_return=float(row["Intraday_Return"]) if not pd.isna(row["Intraday_Return"]) else None,
                 )
 
             print(f"Stored {len(ticker_df)} days of data for {ticker}")
