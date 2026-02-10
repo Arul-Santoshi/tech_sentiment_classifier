@@ -2,8 +2,9 @@ name: Daily Sentiment-Market Pipeline
 
 on:
   schedule:
-    # Run daily at 6 AM UTC (after US market close + settlement)
-    - cron: '0 6 * * *'
+    # Run daily at 8 AM UTC (3 AM EST / 4 AM EDT)
+    # Before pre-market opens, captures overnight news for same-day correlation
+    - cron: '0 8 * * *'
   workflow_dispatch:  # Allow manual trigger
     inputs:
       articles:
