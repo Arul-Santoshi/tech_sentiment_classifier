@@ -34,17 +34,35 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Download existing database
+      - name: Download existing database from previous runs
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v6
         with:
           name: sentiment-market-db
           path: data/
+          workflow: daily_sentiment.yml
+          workflow_conclusion: ""
+          if_no_artifact_found: ignore
+          search_artifacts: true
 
       - name: Initialize database if needed
         run: python -m market_analysis.daily_runner init
 
+      - name: Check NewsAPI key
+        env:
+          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+        run: |
+          if [ -z "$NEWSAPI_KEY" ]; then
+            echo "::warning::NEWSAPI_KEY secret is not set. News fetching will be skipped."
+            echo "SKIP_NEWS=true" >> $GITHUB_ENV
+          else
+            echo "SKIP_NEWS=false" >> $GITHUB_ENV
+          fi
+
       - name: Run daily pipeline
+        if: env.SKIP_NEWS != 'true'
+        continue-on-error: true
+        id: pipeline
         env:
           NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
         run: |
@@ -52,20 +70,35 @@ jobs:
             --articles ${{ github.event.inputs.articles || '100' }} \
             --days 1
 
+      - name: Report pipeline status
+        if: always()
+        run: |
+          if [ "${{ steps.pipeline.outcome }}" == "failure" ]; then
+            echo "::warning::Daily pipeline failed - this may be due to NewsAPI rate limits or key issues. Stock backfill will still proceed."
+          fi
+
       - name: Backfill stock data
         run: |
           python -m market_analysis.daily_runner backfill \
             --days ${{ github.event.inputs.backfill_days || '7' }}
 
       - name: Generate correlation report
-        run: python -m market_analysis.correlation > correlation_report.txt
+        continue-on-error: true
+        run: |
+          if [ -f "data/sentiment_market.db" ]; then
+            python -m market_analysis.correlation > correlation_report.txt || echo "Correlation report generation failed (may need more data)"
+          else
+            echo "No database found - skipping correlation report" > correlation_report.txt
+          fi
 
       - name: Upload database artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sentiment-market-db
           path: data/sentiment_market.db
           retention-days: 90
+          if-no-files-found: ignore
 
       - name: Upload correlation report
         uses: actions/upload-artifact@v4

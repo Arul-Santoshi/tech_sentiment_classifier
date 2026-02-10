@@ -483,7 +483,10 @@ def main():
         if not api_key:
             print("Error: NewsAPI key required. Set NEWSAPI_KEY or use --api-key")
             sys.exit(1)
-        run_daily_pipeline(api_key, db, args.articles, args.days)
+        stats = run_daily_pipeline(api_key, db, args.articles, args.days)
+        if not stats.get("success"):
+            print(f"\nPipeline completed with errors: {stats.get('error', 'Unknown')}")
+            sys.exit(1)
 
     elif args.command == "backfill":
         backfill_historical(None, db, args.days, args.tickers)
